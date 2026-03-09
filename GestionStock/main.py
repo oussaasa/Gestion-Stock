@@ -71,6 +71,39 @@ def save_users(users):
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
+CONFIG_FILE = os.path.join(os.path.expanduser("~"), "stock_config.json")
+
+DEFAULT_CONFIG = {
+    "entreprise_nom":     "Votre Entreprise SARL",
+    "entreprise_adresse": "123 Rue du Commerce",
+    "entreprise_ville":   "20000 Casablanca, Maroc",
+    "entreprise_tel":     "+212 5XX-XXXXXX",
+    "entreprise_email":   "contact@entreprise.ma",
+    "entreprise_if":      "12345678",
+    "entreprise_rc":      "",
+    "entreprise_ice":     "",
+    "facture_conditions": "30 jours net",
+    "facture_monnaie":    "MAD",
+    "facture_tva_defaut": "20",
+    "facture_pied":       "Merci pour votre confiance. Document conforme à la législation marocaine.",
+    "facture_couleur":    "#1a2744",
+    "facture_couleur_accent": "#2563eb",
+}
+
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            c = json.load(f)
+            for k, v in DEFAULT_CONFIG.items():
+                c.setdefault(k, v)
+            return c
+    save_config(DEFAULT_CONFIG.copy())
+    return DEFAULT_CONFIG.copy()
+
+def save_config(config):
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+
 def next_id(lst, key="id", prefix=""):
     if not lst: return f"{prefix}001"
     nums = []
@@ -82,11 +115,15 @@ def next_id(lst, key="id", prefix=""):
 # ══════════════════════════════════════════════════════════════════════════════
 # PDF
 # ══════════════════════════════════════════════════════════════════════════════
-def generer_facture_pdf(commande, client, produits_map, filepath):
+def generer_facture_pdf(commande, client, produits_map, filepath, config=None):
+    if config is None:
+        config = load_config()
+    monnaie = config.get("facture_monnaie", "MAD")
     doc = SimpleDocTemplate(filepath, pagesize=A4,
         rightMargin=1.5*cm, leftMargin=1.5*cm,
         topMargin=1.5*cm, bottomMargin=1.5*cm)
-    BD=rl_colors.HexColor("#1a2744"); BM=rl_colors.HexColor("#2563eb")
+    BD=rl_colors.HexColor(config.get("facture_couleur","#1a2744"))
+    BM=rl_colors.HexColor(config.get("facture_couleur_accent","#2563eb"))
     BL=rl_colors.HexColor("#dbeafe"); GL=rl_colors.HexColor("#f8fafc")
     GM=rl_colors.HexColor("#e2e8f0"); GT=rl_colors.HexColor("#64748b")
     BK=rl_colors.HexColor("#0f172a")
@@ -97,14 +134,27 @@ def generer_facture_pdf(commande, client, produits_map, filepath):
     sr=S("r",fontSize=9,textColor=BK,fontName="Helvetica",alignment=TA_RIGHT)
     styles=getSampleStyleSheet(); story=[]
     W=A4[0]-3*cm
-    hd=[[Paragraph("<b><font color='#1a2744' size='18'>GestionStock Pro</font></b><br/><font color='#64748b' size='9'>Logiciel de gestion commerciale</font>",styles["Normal"]),
-          Paragraph(f"<b><font color='#2563eb' size='26'>FACTURE</font></b><br/><font color='#64748b' size='9'>N° {commande['numero']}</font>",styles["Normal"])]]
+    ent_nom = config.get("entreprise_nom","")
+    ent_hex = config.get("facture_couleur","#1a2744")
+    acc_hex = config.get("facture_couleur_accent","#2563eb")
+    hd=[[Paragraph(f"<b><font color='{ent_hex}' size='18'>{ent_nom}</font></b><br/><font color='#64748b' size='9'>Logiciel de gestion commerciale</font>",styles["Normal"]),
+          Paragraph(f"<b><font color='{acc_hex}' size='26'>FACTURE</font></b><br/><font color='#64748b' size='9'>N° {commande['numero']}</font>",styles["Normal"])]]
     ht=Table(hd,colWidths=[W*.55,W*.45])
     ht.setStyle(TableStyle([("ALIGN",(1,0),(1,0),"RIGHT"),("VALIGN",(0,0),(-1,-1),"TOP"),("BOTTOMPADDING",(0,0),(-1,-1),14)]))
     story.append(ht); story.append(HRFlowable(width="100%",thickness=2,color=BM,spaceAfter=14))
-    em=("<b>De :</b><br/><b>Votre Entreprise SARL</b><br/>123 Rue du Commerce<br/>20000 Casablanca, Maroc<br/>Tél : +212 5XX-XXXXXX<br/>Email : contact@entreprise.ma<br/>IF : 12345678")
+    # Build emetteur block from config
+    em_lines = [f"<b>De :</b>", f"<b>{config.get('entreprise_nom','')}</b>"]
+    if config.get("entreprise_adresse"): em_lines.append(config["entreprise_adresse"])
+    if config.get("entreprise_ville"):   em_lines.append(config["entreprise_ville"])
+    if config.get("entreprise_tel"):     em_lines.append(f"Tél : {config['entreprise_tel']}")
+    if config.get("entreprise_email"):   em_lines.append(f"Email : {config['entreprise_email']}")
+    if config.get("entreprise_if"):      em_lines.append(f"IF : {config['entreprise_if']}")
+    if config.get("entreprise_rc"):      em_lines.append(f"RC : {config['entreprise_rc']}")
+    if config.get("entreprise_ice"):     em_lines.append(f"ICE : {config['entreprise_ice']}")
+    em = "<br/>".join(em_lines)
     cl=(f"<b>Facturé à :</b><br/><b>{client.get('nom','')}</b><br/>{client.get('adresse','')}<br/>{client.get('ville','')}<br/>Tél : {client.get('telephone','')}<br/>Email : {client.get('email','')}<br/>ICE : {client.get('ice','')}")
-    dt=(f"<b>Date :</b> {commande.get('date','')}<br/><b>Échéance :</b> {commande.get('echeance','')}<br/><b>Statut :</b> {commande.get('statut','')}<br/><b>Conditions :</b> {commande.get('conditions','30 jours')}")
+    cond = commande.get('conditions', config.get('facture_conditions','30 jours'))
+    dt=(f"<b>Date :</b> {commande.get('date','')}<br/><b>Échéance :</b> {commande.get('echeance','')}<br/><b>Statut :</b> {commande.get('statut','')}<br/><b>Conditions :</b> {cond}")
     it=Table([[Paragraph(em,sn),Paragraph(cl,sn),Paragraph(dt,sn)]],colWidths=[W*.33,W*.34,W*.33])
     it.setStyle(TableStyle([("BACKGROUND",(0,0),(0,0),GL),("BACKGROUND",(1,0),(1,0),BL),("BACKGROUND",(2,0),(2,0),GL),
         ("BOX",(0,0),(-1,-1),.5,GM),("INNERGRID",(0,0),(-1,-1),.5,GM),
@@ -135,9 +185,9 @@ def generer_facture_pdf(commande, client, produits_map, filepath):
     tv2=net*(ttva/sht if sht else .20); ttc=net+tv2
     def tr(lbl,val,bold=False):
         return [Paragraph(f"<b>{lbl}</b>" if bold else lbl,sr),Paragraph(f"<b>{val}</b>" if bold else val,sr)]
-    tot=[tr("Sous-total HT :",f"{sht:,.2f} MAD")]
-    if rem: tot.append(tr(f"Remise ({rem}%) :",f"- {rem_m:,.2f} MAD"))
-    tot+=[tr("Net HT :",f"{net:,.2f} MAD"),tr("TVA :",f"{tv2:,.2f} MAD"),tr("TOTAL TTC :",f"{ttc:,.2f} MAD",True)]
+    tot=[tr(f"Sous-total HT :",f"{sht:,.2f} {monnaie}")]
+    if rem: tot.append(tr(f"Remise ({rem}%) :",f"- {rem_m:,.2f} {monnaie}"))
+    tot+=[tr(f"Net HT :",f"{net:,.2f} {monnaie}"),tr(f"TVA :",f"{tv2:,.2f} {monnaie}"),tr(f"TOTAL TTC :",f"{ttc:,.2f} {monnaie}",True)]
     tt=Table(tot,colWidths=[W*.7,W*.3])
     tt.setStyle(TableStyle([("ALIGN",(0,0),(-1,-1),"RIGHT"),("TOPPADDING",(0,0),(-1,-1),6),
         ("BOTTOMPADDING",(0,0),(-1,-1),6),("RIGHTPADDING",(0,0),(-1,-1),8),
@@ -147,7 +197,8 @@ def generer_facture_pdf(commande, client, produits_map, filepath):
     if commande.get("note"):
         story.append(Paragraph("<b>Note :</b>",sb)); story.append(Paragraph(commande["note"],sn)); story.append(Spacer(1,10))
     story.append(HRFlowable(width="100%",thickness=1,color=GM,spaceAfter=8))
-    story.append(Paragraph("Merci pour votre confiance. Document conforme à la législation marocaine.",ss))
+    pied = config.get("facture_pied","Merci pour votre confiance.")
+    story.append(Paragraph(pied, ss))
     doc.build(story)
     return filepath
 
@@ -308,6 +359,14 @@ class LoginWindow(tk.Tk):
         self.users = load_users()
         self._build()
 
+        # Set icon
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_icon.ico")
+        if os.path.exists(icon_path):
+            try:
+                self.iconbitmap(icon_path)
+            except Exception:
+                pass
+
     def _center(self, w, h):
         self.update_idletasks()
         sw = self.winfo_screenwidth()
@@ -404,6 +463,17 @@ class GestionStock(tk.Tk):
         self.configure(bg=C["bg"])
         self.minsize(1100, 680)
 
+        # Load config
+        self.config_data = load_config()
+
+        # Set window icon (looks for app_icon.ico next to the script)
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_icon.ico")
+        if os.path.exists(icon_path):
+            try:
+                self.iconbitmap(icon_path)
+            except Exception:
+                pass
+
         apply_treeview_style()
         self._build_layout()
 
@@ -441,6 +511,7 @@ class GestionStock(tk.Tk):
         if self.current_user.get("role") == "admin":
             sections.append(("ADMINISTRATION", [
                 ("👤", "Utilisateurs", "users"),
+                ("⚙️", "Paramètres",   "settings"),
             ]))
 
         for section_title, items in sections:
@@ -527,6 +598,7 @@ class GestionStock(tk.Tk):
             "commandes": self._page_commandes,
             "factures":  self._page_factures,
             "users":     self._page_users,
+            "settings":  self._page_settings,
         }
         if key in pages:
             pages[key]()
@@ -1196,7 +1268,7 @@ class GestionStock(tk.Tk):
                                         initialfile=fn,filetypes=[("PDF","*.pdf")])
         if not fp: return
         try:
-            generer_facture_pdf(cmd,client,pm,fp)
+            generer_facture_pdf(cmd, client, pm, fp, config=self.config_data)
             messagebox.showinfo("Succès",f"PDF généré :\n{fp}")
         except Exception as e:
             messagebox.showerror("Erreur PDF",str(e))
@@ -1316,6 +1388,202 @@ class GestionStock(tk.Tk):
         if messagebox.askyesno("Confirmer",f"Supprimer l'utilisateur « {uname} » ?"):
             self.users=[u for u in self.users if u["username"]!=uname]
             save_users(self.users); self._refresh_users()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PARAMÈTRES / CONFIGURATION FACTURE
+    # ══════════════════════════════════════════════════════════════════════════
+    def _page_settings(self):
+        self._header("Paramètres", "Configuration de l'entreprise et des factures")
+
+        # Scrollable container
+        canvas = tk.Canvas(self.main, bg=C["bg"], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self.main, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        scroll_frame = tk.Frame(canvas, bg=C["bg"])
+        scroll_win = canvas.create_window((0,0), window=scroll_frame, anchor="nw")
+
+        def on_configure(e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        def on_canvas_resize(e):
+            canvas.itemconfig(scroll_win, width=e.width)
+        scroll_frame.bind("<Configure>", on_configure)
+        canvas.bind("<Configure>", on_canvas_resize)
+
+        # Mouse wheel
+        def on_mousewheel(e):
+            canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+        canvas.bind_all("<MouseWheel>", on_mousewheel)
+
+        fields = {}
+
+        def section_card(title, icon, form_fields):
+            """Build a settings card with labeled fields."""
+            outer = card_frame(scroll_frame)
+            outer.pack(fill="x", padx=28, pady=(0,16))
+            inner = tk.Frame(outer, bg=C["card"], padx=24, pady=20)
+            inner.pack(fill="x")
+
+            # Card title
+            title_row = tk.Frame(inner, bg=C["card"])
+            title_row.pack(fill="x", pady=(0,14))
+            tk.Label(title_row, text=icon, font=("Segoe UI",16),
+                     bg=C["card"], fg=C["accent"]).pack(side="left", padx=(0,10))
+            tk.Label(title_row, text=title, font=FONTS["heading"],
+                     bg=C["card"], fg=C["fg"]).pack(side="left")
+            separator(inner).pack(fill="x", pady=(0,14))
+
+            # Two-column grid
+            grid = tk.Frame(inner, bg=C["card"])
+            grid.pack(fill="x")
+            grid.columnconfigure(1, weight=1)
+            grid.columnconfigure(3, weight=1)
+
+            for i, (label, key, hint) in enumerate(form_fields):
+                row = i // 2
+                col_base = (i % 2) * 2
+                tk.Label(grid, text=label, font=FONTS["small"],
+                         bg=C["card"], fg=C["fg2"], anchor="w",
+                         width=18).grid(row=row*2, column=col_base, sticky="w",
+                                        padx=(0 if col_base==0 else 20, 8), pady=(8,2))
+                v = tk.StringVar(value=self.config_data.get(key, ""))
+                e = make_entry(grid, textvariable=v)
+                e.grid(row=row*2+1, column=col_base, sticky="ew",
+                       padx=(0 if col_base==0 else 20, 8), ipady=6)
+                if hint:
+                    tk.Label(grid, text=hint, font=("Segoe UI",8),
+                             bg=C["card"], fg=C["fg3"]).grid(row=row*2+2, column=col_base, sticky="w",
+                                                              padx=(0 if col_base==0 else 20, 8))
+                fields[key] = v
+
+        # Section 1: Entreprise
+        section_card("Informations de l'entreprise", "🏢", [
+            ("Nom / Raison sociale",  "entreprise_nom",     "Apparaît en haut de la facture"),
+            ("Adresse",               "entreprise_adresse", "Rue, numéro..."),
+            ("Ville / Code postal",   "entreprise_ville",   "Ex : 20000 Casablanca"),
+            ("Téléphone",             "entreprise_tel",     ""),
+            ("Email",                 "entreprise_email",   ""),
+            ("Identifiant fiscal (IF)","entreprise_if",     ""),
+            ("Registre Commerce (RC)","entreprise_rc",      ""),
+            ("ICE",                   "entreprise_ice",     "Identifiant Commun de l'Entreprise"),
+        ])
+
+        # Section 2: Facture
+        section_card("Configuration des factures", "🧾", [
+            ("Conditions de paiement","facture_conditions","Ex : 30 jours net, Paiement immédiat..."),
+            ("Devise / Monnaie",      "facture_monnaie",   "Ex : MAD, EUR, USD"),
+            ("TVA par défaut (%)",    "facture_tva_defaut","Appliquée automatiquement aux nouvelles lignes"),
+            ("",                      "",                  ""),
+        ])
+
+        # Pied de page (full width)
+        outer2 = card_frame(scroll_frame)
+        outer2.pack(fill="x", padx=28, pady=(0,16))
+        inner2 = tk.Frame(outer2, bg=C["card"], padx=24, pady=20)
+        inner2.pack(fill="x")
+        title_row2 = tk.Frame(inner2, bg=C["card"])
+        title_row2.pack(fill="x", pady=(0,10))
+        tk.Label(title_row2, text="📝", font=("Segoe UI",16),
+                 bg=C["card"], fg=C["accent"]).pack(side="left", padx=(0,10))
+        tk.Label(title_row2, text="Pied de page de la facture", font=FONTS["heading"],
+                 bg=C["card"], fg=C["fg"]).pack(side="left")
+        separator(inner2).pack(fill="x", pady=(0,12))
+        tk.Label(inner2, text="Texte de bas de facture", font=FONTS["small"],
+                 bg=C["card"], fg=C["fg2"]).pack(anchor="w", pady=(0,4))
+        pied_v = tk.StringVar(value=self.config_data.get("facture_pied",""))
+        pied_e = make_entry(inner2, textvariable=pied_v)
+        pied_e.pack(fill="x", ipady=8)
+        fields["facture_pied"] = pied_v
+
+        # Section 3: Couleurs PDF
+        outer3 = card_frame(scroll_frame)
+        outer3.pack(fill="x", padx=28, pady=(0,16))
+        inner3 = tk.Frame(outer3, bg=C["card"], padx=24, pady=20)
+        inner3.pack(fill="x")
+        title_row3 = tk.Frame(inner3, bg=C["card"])
+        title_row3.pack(fill="x", pady=(0,10))
+        tk.Label(title_row3, text="🎨", font=("Segoe UI",16),
+                 bg=C["card"], fg=C["accent"]).pack(side="left", padx=(0,10))
+        tk.Label(title_row3, text="Couleurs du PDF", font=FONTS["heading"],
+                 bg=C["card"], fg=C["fg"]).pack(side="left")
+        separator(inner3).pack(fill="x", pady=(0,12))
+        colors_grid = tk.Frame(inner3, bg=C["card"])
+        colors_grid.pack(fill="x")
+        for i,(label,key,default) in enumerate([
+            ("Couleur principale",  "facture_couleur",        "#1a2744"),
+            ("Couleur accent",      "facture_couleur_accent", "#2563eb"),
+        ]):
+            col = i * 2
+            colors_grid.columnconfigure(col+1, weight=1)
+            tk.Label(colors_grid, text=label, font=FONTS["small"],
+                     bg=C["card"], fg=C["fg2"]).grid(row=0, column=col, sticky="w", padx=(0 if col==0 else 20, 8))
+            v = tk.StringVar(value=self.config_data.get(key, default))
+            entry = make_entry(colors_grid, textvariable=v, width=12)
+            entry.grid(row=1, column=col, sticky="ew", padx=(0 if col==0 else 20, 8), ipady=6)
+            # Color preview swatch
+            swatch = tk.Label(colors_grid, text="  ", bg=self.config_data.get(key,default), width=4)
+            swatch.grid(row=1, column=col+1, sticky="w", padx=(0,8))
+            def update_swatch(e, sv=v, sw=swatch):
+                try: sw.configure(bg=sv.get())
+                except: pass
+            entry.bind("<KeyRelease>", update_swatch)
+            fields[key] = v
+
+        tk.Label(inner3, text="Format hexadécimal : ex #1a2744  •  Modifiez la valeur pour voir l'aperçu →",
+                 font=("Segoe UI",8), bg=C["card"], fg=C["fg3"]).pack(anchor="w", pady=(10,0))
+
+        # Preview + Save row
+        action_row = tk.Frame(scroll_frame, bg=C["bg"])
+        action_row.pack(fill="x", padx=28, pady=(4,24))
+
+        def save_settings():
+            for key, var in fields.items():
+                if key:
+                    self.config_data[key] = var.get().strip()
+            save_config(self.config_data)
+            # Show confirmation banner
+            banner = tk.Frame(scroll_frame, bg=C["green"], pady=8)
+            banner.pack(fill="x", padx=28)
+            tk.Label(banner, text="✅  Paramètres enregistrés avec succès !",
+                     font=FONTS["body"], bg=C["green"], fg=C["white"]).pack()
+            banner.after(3000, banner.destroy)
+
+        def preview_pdf():
+            # Generate a preview PDF with dummy data
+            if not REPORTLAB_OK:
+                messagebox.showerror("Erreur","reportlab non installé."); return
+            # Apply current field values temporarily
+            temp_cfg = {k: v.get().strip() for k,v in fields.items() if k}
+            for k,v in self.config_data.items():
+                temp_cfg.setdefault(k,v)
+            dummy_cmd = {
+                "numero":"PREVIEW-001","date":datetime.now().strftime("%Y-%m-%d"),
+                "echeance":datetime.now().strftime("%Y-%m-%d"),"statut":"Aperçu",
+                "client_nom":"Client Exemple","remise":0,
+                "lignes":[
+                    {"produit_nom":"Produit A","quantite":2,"prix_unit":500,"tva":20},
+                    {"produit_nom":"Produit B","quantite":5,"prix_unit":120,"tva":20},
+                ],
+                "total_ht":1600,"total_tva":320,"total_ttc":1920,
+                "note":"Ceci est un aperçu de votre facture.",
+                "conditions": temp_cfg.get("facture_conditions","30 jours"),
+            }
+            dummy_client = {"nom":"Client Exemple SARL","adresse":"45 Bd Mohammed V",
+                            "ville":"20000 Casablanca","telephone":"+212 522-000000",
+                            "email":"client@exemple.ma","ice":"001234567000000"}
+            fp = filedialog.asksaveasfilename(title="Aperçu PDF",
+                defaultextension=".pdf",initialfile="apercu_facture.pdf",
+                filetypes=[("PDF","*.pdf")])
+            if not fp: return
+            try:
+                generer_facture_pdf(dummy_cmd, dummy_client, {}, fp, config=temp_cfg)
+                messagebox.showinfo("Aperçu généré", f"PDF enregistré :\n{fp}")
+            except Exception as ex:
+                messagebox.showerror("Erreur", str(ex))
+
+        make_btn(action_row, "👁️  Aperçu PDF", preview_pdf, C["accent2"]).pack(side="left", padx=(0,8))
+        make_btn(action_row, "💾  Enregistrer les paramètres", save_settings, C["green"]).pack(side="left")
 
     # ══════════════════════════════════════════════════════════════════════════
     # HELPERS
